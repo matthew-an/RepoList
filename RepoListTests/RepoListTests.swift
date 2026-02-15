@@ -75,13 +75,13 @@ struct MockGitHubService: GitHubServiceProtocol {
     /// Tracks how many times fetchRepositories has been called.
     private let fetchRepositoriesCallCount = MutableBox(0)
     
-    func fetchRepositories(since: Int?) async throws -> RepositoryPage {
+    func fetchRepositories(nextPageURL: URL?) async throws -> RepositoryPage {
         if let error = shouldThrow { throw error }
         fetchRepositoriesCallCount.value += 1
         // Return the first page for initial load, second for pagination, etc.
         let index = fetchRepositoriesCallCount.value - 1
         guard index < repositoryPages.count else {
-            return RepositoryPage(repositories: [], nextSince: nil)
+            return RepositoryPage(repositories: [], nextPageURL: nil)
         }
         return repositoryPages[index]
     }
@@ -127,7 +127,7 @@ struct ViewModelTests {
     @Test func loadRepositoriesPopulatesList() async {
         let repos = Self.makeRepos(3)
         let mock = MockGitHubService(
-            repositoryPages: [RepositoryPage(repositories: repos, nextSince: 100)]
+            repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: URL(string: "https://api.github.com/repositories?since=100"))]
         )
         let viewModel = await RepositoryListViewModel(service: mock)
 
@@ -157,8 +157,8 @@ struct ViewModelTests {
         let secondPage = Self.makeRepos(2, startingId: 3)
         let mock = MockGitHubService(
             repositoryPages: [
-                RepositoryPage(repositories: firstPage, nextSince: 2),
-                RepositoryPage(repositories: secondPage, nextSince: nil)
+                RepositoryPage(repositories: firstPage, nextPageURL: URL(string: "https://api.github.com/repositories?since=2")),
+                RepositoryPage(repositories: secondPage, nextPageURL: nil)
             ]
         )
         let viewModel = await RepositoryListViewModel(service: mock)
@@ -179,7 +179,7 @@ struct ViewModelTests {
     @Test func loadStarCountSetsLoadedState() async {
         let repos = Self.makeRepos(1)
         let mock = MockGitHubService(
-            repositoryPages: [RepositoryPage(repositories: repos, nextSince: nil)],
+            repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: nil)],
             starCounts: ["octocat/repo-1": 42]
         )
         let viewModel = await RepositoryListViewModel(service: mock)
@@ -199,7 +199,7 @@ struct ViewModelTests {
         let repos = Self.makeRepos(1)
         // No star counts in mock → will throw.
         let mock = MockGitHubService(
-            repositoryPages: [RepositoryPage(repositories: repos, nextSince: nil)]
+            repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: nil)]
         )
         let viewModel = await RepositoryListViewModel(service: mock)
 
@@ -217,7 +217,7 @@ struct ViewModelTests {
     @Test func loadStarCountSkipsIfAlreadyLoaded() async {
         let repos = Self.makeRepos(1)
         let mock = MockGitHubService(
-            repositoryPages: [RepositoryPage(repositories: repos, nextSince: nil)],
+            repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: nil)],
             starCounts: ["octocat/repo-1": 42]
         )
         let viewModel = await RepositoryListViewModel(service: mock)

@@ -19,9 +19,9 @@ final class RepositoryListViewModel {
     // the key is the repo's id.
     var starCounts: [Int: StarCountState] = [:]
 
-    // Holds the `nextSince` value from the last call of fetching repos.
-    // it's nil in the first place, meaning we are fetching the first page.
-    private var nextSince: Int?
+    // The URL for the next page of repositories, extracted from the Link header.
+    // nil means either we haven't fetched yet or there are no more pages.
+    private var nextPageURL: URL?
     
     private var hasMorePages = true
 
@@ -47,10 +47,10 @@ final class RepositoryListViewModel {
         errorMessage = nil
 
         do {
-            let page = try await service.fetchRepositories(since: nil)
+            let page = try await service.fetchRepositories(nextPageURL: nil)
             repositories = page.repositories
-            nextSince = page.nextSince
-            hasMorePages = page.nextSince != nil
+            nextPageURL = page.nextPageURL
+            hasMorePages = page.nextPageURL != nil
             starCounts = [:]
         } catch {
             errorMessage = (error as? NetworkError)?.errorDescription
@@ -74,12 +74,12 @@ final class RepositoryListViewModel {
         isLoadingMore = true
 
         do {
-            let page = try await service.fetchRepositories(since: nextSince)
+            let page = try await service.fetchRepositories(nextPageURL: nextPageURL)
             
             // Append the result to the existing list.
             repositories.append(contentsOf: page.repositories)
-            nextSince = page.nextSince
-            hasMorePages = page.nextSince != nil
+            nextPageURL = page.nextPageURL
+            hasMorePages = page.nextPageURL != nil
         } catch {
             errorMessage = (error as? NetworkError)?.errorDescription
                 ?? error.localizedDescription

@@ -36,10 +36,10 @@ struct RepositoryPage: Sendable {
     let repositories: [Repository]
     
     /**
-     GitHub's `/repositories` endpoint uses a cursor-based pagination via a since parameter,
-     This property holds the last repo's ID in the repo list returned from the endpoint.
+     The full URL for the next page, extracted from the `Link` header.
+     `nil` means there are no more pages.
      */
-    let nextSince: Int?
+    let nextPageURL: URL?
 }
 
 /**
@@ -47,7 +47,7 @@ struct RepositoryPage: Sendable {
  This enables dependency injection, making it easy to substitute a mock in tests.
  */
 protocol GitHubServiceProtocol: Sendable {
-    func fetchRepositories(since: Int?) async throws -> RepositoryPage
+    func fetchRepositories(nextPageURL: URL?) async throws -> RepositoryPage
     func fetchStarCount(owner: String, repo: String) async throws -> Int
 }
 
@@ -57,28 +57,25 @@ struct GitHubService: GitHubServiceProtocol {
     private let session = URLSession.shared
 
     /**
-     First request: no `since`, get the first page of repos.
-     In the response's header of the endpoint, we can get the `nextSince` value, which we can
-     pass into the following call to this method and get the following page of repos.
+     Fetches a page of repositories.
+     Pass `nil` for the first page; subsequent pages use the URL from `RepositoryPage.nextPageURL`.
      */
-    func fetchRepositories(since: Int? = nil) async throws -> RepositoryPage {
-        var urlString = "\(baseURL)/repositories"
-        if let since {
-            urlString += "?since=\(since)"
-        }
-
-        guard let url = URL(string: urlString) else {
-            throw NetworkError.invalidURL
+    func fetchRepositories(nextPageURL: URL? = nil) async throws -> RepositoryPage {
+        let url: URL
+        if let nextPageURL {
+            url = nextPageURL
+        } else {
+            guard let firstPageURL = URL(string: "\(baseURL)/repositories") else {
+                throw NetworkError.invalidURL
+            }
+            url = firstPageURL
         }
 
         let (data, response) = try await performRequest(url: url)
-        
-        // Get the `nextSince` value from the response.
-        let nextSince = Self.parseNextSince(from: response)
 
         do {
             let repos = try JSONDecoder().decode([Repository].self, from: data)
-            return RepositoryPage(repositories: repos, nextSince: nextSince)
+            return RepositoryPage(repositories: repos, nextPageURL: Self.parseNextPageURL(from: response))
         } catch let error as DecodingError {
             throw NetworkError.decodingError(error.localizedDescription)
         }
@@ -141,9 +138,9 @@ struct GitHubService: GitHubServiceProtocol {
     }
 
     /**
-     A utiltiy method used to retrieve the `nextSince` from the response's header
+     Extracts the "next" page URL from the response's `Link` header.
      */
-    private static func parseNextSince(from response: HTTPURLResponse) -> Int? {
+    private static func parseNextPageURL(from response: HTTPURLResponse) -> URL? {
         guard let linkHeader = response.value(forHTTPHeaderField: "Link") else {
             return nil
         }
@@ -154,15 +151,11 @@ struct GitHubService: GitHubServiceProtocol {
                   parts[1].trimmingCharacters(in: .whitespaces).contains("rel=\"next\"")
             else { continue }
 
-            let urlPart = parts[0]
+            let urlString = parts[0]
                 .trimmingCharacters(in: .whitespaces)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
 
-            if let components = URLComponents(string: urlPart),
-               let sinceValue = components.queryItems?.first(where: { $0.name == "since" })?.value,
-               let since = Int(sinceValue) {
-                return since
-            }
+            return URL(string: urlString)
         }
 
         return nil
