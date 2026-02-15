@@ -6,7 +6,7 @@ struct Repository: Identifiable, Codable, Sendable {
     let owner: Owner
 }
 
-struct Owner: Codable, Sendable, Identifiable {
+struct Owner: Codable, Sendable {
     let id: Int
     let login: String
     let avatarURL: String

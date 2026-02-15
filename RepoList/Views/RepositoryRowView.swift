@@ -67,8 +67,8 @@ struct RepositoryRowView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             case .failed:
-                // We may add a retry logic here to give it another chance
-                // to laod the star count.
+                // Show N/A; the view model will retry on next appearance
+                // since it allows retries for the .failed state.
                 Text("N/A")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -77,7 +77,7 @@ struct RepositoryRowView: View {
     }
 
     static func formatCount(_ count: Int) -> String {
-        if count >= 1_000_000 {
+        if count >= 999_950 {
             return String(format: "%.1fM", Double(count) / 1_000_000)
         } else if count >= 1_000 {
             return String(format: "%.1fK", Double(count) / 1_000)

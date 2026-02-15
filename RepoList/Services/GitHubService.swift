@@ -1,7 +1,7 @@
 import Foundation
 
 /**
- An enumeration indicating the possible error during the nerwork/api layer.
+ An enumeration indicating the possible error during the network/api layer.
  */
 enum NetworkError: LocalizedError, Sendable {
     case invalidURL
@@ -55,6 +55,7 @@ struct GitHubService: GitHubServiceProtocol {
     
     private let baseURL = "https://api.github.com"
     private let session = URLSession.shared
+    private let decoder = JSONDecoder()
 
     /**
      Fetches a page of repositories.
@@ -74,7 +75,7 @@ struct GitHubService: GitHubServiceProtocol {
         let (data, response) = try await performRequest(url: url)
 
         do {
-            let repos = try JSONDecoder().decode([Repository].self, from: data)
+            let repos = try decoder.decode([Repository].self, from: data)
             return RepositoryPage(repositories: repos, nextPageURL: Self.parseNextPageURL(from: response))
         } catch let error as DecodingError {
             throw NetworkError.decodingError(error.localizedDescription)
@@ -96,7 +97,7 @@ struct GitHubService: GitHubServiceProtocol {
         let (data, _) = try await performRequest(url: url)
 
         do {
-            let detail = try JSONDecoder().decode(RepositoryDetail.self, from: data)
+            let detail = try decoder.decode(RepositoryDetail.self, from: data)
             return detail.stargazersCount
         } catch let error as DecodingError {
             throw NetworkError.decodingError(error.localizedDescription)

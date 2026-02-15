@@ -2,6 +2,7 @@ import Testing
 import Foundation
 @testable import RepoList
 
+@MainActor
 struct RepositoryModelTests {
 
     @Test func decodesRepositoryFromJSON() throws {
@@ -46,6 +47,7 @@ struct RepositoryModelTests {
     }
 }
 
+@MainActor
 struct RepositoryRowViewTests {
 
     @Test func formatCountShowsRawNumberUnder1000() {
@@ -56,10 +58,12 @@ struct RepositoryRowViewTests {
     @Test func formatCountShowsKForThousands() {
         #expect(RepositoryRowView.formatCount(1_000) == "1.0K")
         #expect(RepositoryRowView.formatCount(1_500) == "1.5K")
-        #expect(RepositoryRowView.formatCount(999_999) == "1000.0K")
+        #expect(RepositoryRowView.formatCount(999_949) == "999.9K")
     }
 
     @Test func formatCountShowsMForMillions() {
+        #expect(RepositoryRowView.formatCount(999_950) == "1.0M")
+        #expect(RepositoryRowView.formatCount(999_999) == "1.0M")
         #expect(RepositoryRowView.formatCount(1_000_000) == "1.0M")
         #expect(RepositoryRowView.formatCount(2_500_000) == "2.5M")
     }
@@ -106,16 +110,16 @@ final class MutableBox<T>: @unchecked Sendable {
 
 struct ViewModelTests {
 
-    private static let sampleOwner = Owner(id: 1, login: "octocat", avatarURL: "https://example.com/avatar.png")
+    private static let testOwner = Owner(id: 1, login: "octocat", avatarURL: "https://example.com/avatar.png")
 
     private static func makeRepos(_ count: Int, startingId: Int = 1) -> [Repository] {
         (0..<count).map { i in
-            Repository(id: startingId + i, name: "repo-\(startingId + i)", owner: sampleOwner)
+            Repository(id: startingId + i, name: "repo-\(startingId + i)", owner: testOwner)
         }
     }
 
     @Test func initialStateIsEmpty() async {
-        let viewModel = await RepositoryListViewModel(service: MockGitHubService())
+        let viewModel = RepositoryListViewModel(service: MockGitHubService())
 
         await #expect(viewModel.repositories.isEmpty)
         await #expect(viewModel.isLoading == false)
@@ -129,7 +133,7 @@ struct ViewModelTests {
         let mock = MockGitHubService(
             repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: URL(string: "https://api.github.com/repositories?since=100"))]
         )
-        let viewModel = await RepositoryListViewModel(service: mock)
+        let viewModel = RepositoryListViewModel(service: mock)
 
         await viewModel.loadRepositories()
 
@@ -143,7 +147,7 @@ struct ViewModelTests {
         let mock = MockGitHubService(
             shouldThrow: NetworkError.networkError("Connection failed")
         )
-        let viewModel = await RepositoryListViewModel(service: mock)
+        let viewModel = RepositoryListViewModel(service: mock)
 
         await viewModel.loadRepositories()
 
@@ -161,7 +165,7 @@ struct ViewModelTests {
                 RepositoryPage(repositories: secondPage, nextPageURL: nil)
             ]
         )
-        let viewModel = await RepositoryListViewModel(service: mock)
+        let viewModel = RepositoryListViewModel(service: mock)
 
         // Load first page.
         await viewModel.loadRepositories()
@@ -182,17 +186,12 @@ struct ViewModelTests {
             repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: nil)],
             starCounts: ["octocat/repo-1": 42]
         )
-        let viewModel = await RepositoryListViewModel(service: mock)
+        let viewModel = RepositoryListViewModel(service: mock)
 
         await viewModel.loadRepositories()
         await viewModel.loadStarCount(for: repos[0])
 
-        let state = await viewModel.starCounts[repos[0].id]
-        if case .loaded(let count) = state {
-            #expect(count == 42)
-        } else {
-            Issue.record("Expected .loaded(42), got \(String(describing: state))")
-        }
+        await #expect(viewModel.starCounts[repos[0].id] == .loaded(42))
     }
 
     @Test func loadStarCountSetsFailedOnError() async {
@@ -201,17 +200,12 @@ struct ViewModelTests {
         let mock = MockGitHubService(
             repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: nil)]
         )
-        let viewModel = await RepositoryListViewModel(service: mock)
+        let viewModel = RepositoryListViewModel(service: mock)
 
         await viewModel.loadRepositories()
         await viewModel.loadStarCount(for: repos[0])
 
-        let state = await viewModel.starCounts[repos[0].id]
-        if case .failed = state {
-            // Expected
-        } else {
-            Issue.record("Expected .failed, got \(String(describing: state))")
-        }
+        await #expect(viewModel.starCounts[repos[0].id] == .failed)
     }
 
     @Test func loadStarCountSkipsIfAlreadyLoaded() async {
@@ -220,17 +214,37 @@ struct ViewModelTests {
             repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: nil)],
             starCounts: ["octocat/repo-1": 42]
         )
-        let viewModel = await RepositoryListViewModel(service: mock)
+        let viewModel = RepositoryListViewModel(service: mock)
 
         await viewModel.loadRepositories()
         await viewModel.loadStarCount(for: repos[0])
         await viewModel.loadStarCount(for: repos[0]) // Second call should be a no-op.
 
-        let state = await viewModel.starCounts[repos[0].id]
-        if case .loaded(let count) = state {
-            #expect(count == 42)
-        } else {
-            Issue.record("Expected .loaded(42), got \(String(describing: state))")
-        }
+        await #expect(viewModel.starCounts[repos[0].id] == .loaded(42))
+    }
+
+    @Test func loadStarCountRetriesAfterFailure() async {
+        let repos = Self.makeRepos(1)
+        let mock = MockGitHubService(
+            repositoryPages: [RepositoryPage(repositories: repos, nextPageURL: nil)],
+            starCounts: ["octocat/repo-1": 99]
+        )
+        let viewModel = RepositoryListViewModel(service: mock)
+
+        await viewModel.loadRepositories()
+
+        // Simulate a previous failed attempt.
+        await setFailedStarCount(on: viewModel, for: repos[0].id)
+
+        // Retry should be allowed for .failed state.
+        await viewModel.loadStarCount(for: repos[0])
+
+        await #expect(viewModel.starCounts[repos[0].id] == .loaded(99))
     }
 }
+
+@MainActor
+private func setFailedStarCount(on viewModel: RepositoryListViewModel, for id: Int) {
+    viewModel.starCounts[id] = .failed
+}
+

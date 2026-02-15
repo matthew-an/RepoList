@@ -25,16 +25,24 @@ final class RepositoryListViewModel {
     
     private var hasMorePages = true
 
+    /// Number of items from the end of the list at which to trigger the next page fetch.
+    private let prefetchThreshold = 5
+
     private let service: GitHubServiceProtocol
 
-    init(service: GitHubServiceProtocol = GitHubService()) {
+    // Make the initializer nonisolated and avoid calling a @MainActor init from here.
+    nonisolated init(service: GitHubServiceProtocol) {
         self.service = service
+    }
+
+    convenience init() {
+        self.init(service: GitHubService())
     }
 
     /**
      An enum indicating the status of loading star count.
      */
-    enum StarCountState {
+    enum StarCountState: Equatable {
         case loading
         case loaded(Int)
         case failed
@@ -44,6 +52,7 @@ final class RepositoryListViewModel {
         guard !isLoading else { return }
 
         isLoading = true
+        defer { isLoading = false }
         errorMessage = nil
 
         do {
@@ -52,26 +61,25 @@ final class RepositoryListViewModel {
             nextPageURL = page.nextPageURL
             hasMorePages = page.nextPageURL != nil
             starCounts = [:]
+        } catch is CancellationError {
+            // Task was cancelled (e.g. view disappeared); ignore silently.
         } catch {
             errorMessage = (error as? NetworkError)?.errorDescription
                 ?? error.localizedDescription
         }
-
-        isLoading = false
     }
 
     func loadMoreIfNeeded(currentItem: Repository) async {
-        // Check whether the item is the last one in the repo.
-        // If so, it means users scrolls to the end of the list,
-        // then check whether we have more pages here
-        // then check whether it is already in the progress of loading more pages.
-        guard let lastItem = repositories.last,
-              currentItem.id == lastItem.id,
-              hasMorePages,
-              !isLoadingMore
+        // Trigger prefetch when the user is within `prefetchThreshold` items
+        // of the end, and we aren't already loading.
+        guard hasMorePages,
+              !isLoadingMore,
+              let index = repositories.firstIndex(where: { $0.id == currentItem.id }),
+              index >= repositories.count - prefetchThreshold
         else { return }
 
         isLoadingMore = true
+        defer { isLoadingMore = false }
 
         do {
             let page = try await service.fetchRepositories(nextPageURL: nextPageURL)
@@ -80,18 +88,20 @@ final class RepositoryListViewModel {
             repositories.append(contentsOf: page.repositories)
             nextPageURL = page.nextPageURL
             hasMorePages = page.nextPageURL != nil
+        } catch is CancellationError {
+            // Task was cancelled; ignore silently.
         } catch {
             errorMessage = (error as? NetworkError)?.errorDescription
                 ?? error.localizedDescription
         }
-
-        isLoadingMore = false
     }
 
     func loadStarCount(for repo: Repository) async {
-        // If it tried to load the star count for the repo
-        // just return, don't need to load it again.
-        guard starCounts[repo.id] == nil else { return }
+        // Allow retry when the previous attempt failed.
+        // Skip if already loading or successfully loaded.
+        if let existing = starCounts[repo.id], existing != .failed {
+            return
+        }
         
         // Mark it as start loading.
         starCounts[repo.id] = .loading
@@ -102,6 +112,9 @@ final class RepositoryListViewModel {
                 repo: repo.name
             )
             starCounts[repo.id] = .loaded(count)
+        } catch is CancellationError {
+            // Revert to nil so the next appearance can retry.
+            starCounts[repo.id] = nil
         } catch {
             starCounts[repo.id] = .failed
         }

@@ -71,14 +71,25 @@ struct RepositoryListView: View {
                 .listRowSeparator(.hidden)
             }
 
-            // Show error message if there is any when loading more pages.
+            // Show error message with retry when pagination fails.
             if let error = viewModel.errorMessage,
                !viewModel.repositories.isEmpty {
-                HStack {
+                VStack(spacing: 8) {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Button("Retry") {
+                        Task {
+                            guard let lastItem = viewModel.repositories.last else { return }
+                            viewModel.errorMessage = nil
+                            await viewModel.loadMoreIfNeeded(currentItem: lastItem)
+                        }
+                    }
+                    .font(.caption)
+                    .buttonStyle(.bordered)
                 }
+                .frame(maxWidth: .infinity)
+                .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
