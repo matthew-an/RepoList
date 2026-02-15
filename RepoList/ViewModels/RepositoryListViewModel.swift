@@ -5,6 +5,7 @@ import Observation
  Make it observable so that whenever its properties changes, SwiftUI will refresh the UI automatically.
  */
 @Observable
+@MainActor
 final class RepositoryListViewModel {
     
     var repositories: [Repository] = []
