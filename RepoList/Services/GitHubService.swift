@@ -42,17 +42,26 @@ struct RepositoryPage: Sendable {
     let nextSince: Int?
 }
 
-enum GitHubService {
+/**
+ A protocol that abstracts GitHub API operations.
+ This enables dependency injection, making it easy to substitute a mock in tests.
+ */
+protocol GitHubServiceProtocol: Sendable {
+    func fetchRepositories(since: Int?) async throws -> RepositoryPage
+    func fetchStarCount(owner: String, repo: String) async throws -> Int
+}
+
+struct GitHubService: GitHubServiceProtocol {
     
-    private static let baseURL = "https://api.github.com"
-    private static let session = URLSession.shared
+    private let baseURL = "https://api.github.com"
+    private let session = URLSession.shared
 
     /**
      First request: no `since`, get the first page of repos.
      In the response's header of the endpoint, we can get the `nextSince` value, which we can
      pass into the following call to this method and get the following page of repos.
      */
-    static func fetchRepositories(since: Int? = nil) async throws -> RepositoryPage {
+    func fetchRepositories(since: Int? = nil) async throws -> RepositoryPage {
         var urlString = "\(baseURL)/repositories"
         if let since {
             urlString += "?since=\(since)"
@@ -65,7 +74,7 @@ enum GitHubService {
         let (data, response) = try await performRequest(url: url)
         
         // Get the `nextSince` value from the response.
-        let nextSince = parseNextSince(from: response)
+        let nextSince = Self.parseNextSince(from: response)
 
         do {
             let repos = try JSONDecoder().decode([Repository].self, from: data)
@@ -80,7 +89,7 @@ enum GitHubService {
      When we need to display the star count for a repo, we make a call this method
      to fetch the data.
      */
-    static func fetchStarCount(owner: String, repo: String) async throws -> Int {
+    func fetchStarCount(owner: String, repo: String) async throws -> Int {
         let urlString = "\(baseURL)/repos/\(owner)/\(repo)"
 
         guard let url = URL(string: urlString) else {
@@ -100,7 +109,7 @@ enum GitHubService {
     /**
      A general method to process the api response and handle the errors accordingly.
      */
-    private static func performRequest(url: URL) async throws -> (Data, HTTPURLResponse) {
+    private func performRequest(url: URL) async throws -> (Data, HTTPURLResponse) {
         let data: Data
         let response: URLResponse
 

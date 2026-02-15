@@ -25,6 +25,12 @@ final class RepositoryListViewModel {
     
     private var hasMorePages = true
 
+    private let service: GitHubServiceProtocol
+
+    init(service: GitHubServiceProtocol = GitHubService()) {
+        self.service = service
+    }
+
     /**
      An enum indicating the status of loading star count.
      */
@@ -41,7 +47,7 @@ final class RepositoryListViewModel {
         errorMessage = nil
 
         do {
-            let page = try await GitHubService.fetchRepositories()
+            let page = try await service.fetchRepositories(since: nil)
             repositories = page.repositories
             nextSince = page.nextSince
             hasMorePages = page.nextSince != nil
@@ -68,7 +74,7 @@ final class RepositoryListViewModel {
         isLoadingMore = true
 
         do {
-            let page = try await GitHubService.fetchRepositories(since: nextSince)
+            let page = try await service.fetchRepositories(since: nextSince)
             
             // Append the result to the existing list.
             repositories.append(contentsOf: page.repositories)
@@ -91,7 +97,7 @@ final class RepositoryListViewModel {
         starCounts[repo.id] = .loading
 
         do {
-            let count = try await GitHubService.fetchStarCount(
+            let count = try await service.fetchStarCount(
                 owner: repo.owner.login,
                 repo: repo.name
             )
